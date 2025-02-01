@@ -43,12 +43,14 @@ fn push_signatures(signatures: &[&str]) -> Result<(), String> {
                 block_hash: Default::default(),
                 signature: Binary::new(signature.as_bytes().into()),
             };
+            let msg_json = serde_json::to_string(&msg)
+                .map_err(|e| format!("could not serialize message: {e}"))?;
+
             MsgExecuteContract {
                 // TODO
                 sender: AccountId::from_str("").unwrap(),
                 contract: contract_address(),
-                msg: bincode::serialize(&msg)
-                    .map_err(|e| format!("could not serialize message: {e}"))?,
+                msg: msg_json.into(),
                 funds: vec![],
             }
             .to_any()
