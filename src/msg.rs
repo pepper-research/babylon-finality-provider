@@ -1,6 +1,6 @@
 use babylon_apis::finality_api::Evidence;
 use babylon_merkle::Proof;
-use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Binary};
 
 #[cw_serde]
