@@ -6,13 +6,13 @@ use std::{fs, path::PathBuf, str::FromStr};
 
 pub const BABYLON_ACCOUNT_ID_PREFIX: &str = "bbn";
 
-pub static BABYLON_DENOM: Lazy<Denom> = Lazy::new(|| match Denom::from_str("bbn") {
+pub static BABYLON_DENOM: Lazy<Denom> = Lazy::new(|| match Denom::from_str("ubbn") {
     Ok(denom) => denom,
     Err(e) => panic!("could not create denom: {e}"),
 });
 
 pub static BABYLON_CHAIN_ID: Lazy<chain::Id> =
-    Lazy::new(|| match chain::Id::from_str("euphrates") {
+    Lazy::new(|| match chain::Id::from_str("euphrates-0.5.0") {
         Ok(id) => id,
         Err(e) => panic!("could not parse chain id: {e}"),
     });

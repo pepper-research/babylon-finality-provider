@@ -14,13 +14,18 @@ use cosmrs::{
     auth::BaseAccount,
     cosmwasm::MsgExecuteContract,
     crypto::secp256k1::SigningKey,
-    proto::prost::Message,
-    rpc::HttpClient,
+    proto::{
+        cosmos::auth::v1beta1::{self, query_client::QueryClient, QueryAccountRequest},
+        prost::Message,
+    },
+    rpc::{Client, HttpClient},
+    tendermint::block::Height,
     tx::{Body, Fee, Msg, SignDoc, SignerInfo},
     AccountId,
 };
-use cosmwasm_std::Binary;
+use cosmwasm_std::{to_hex, Binary};
 use std::{path::PathBuf, str::FromStr};
+use tonic::transport::{Channel, ClientTlsConfig};
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
 /// The rollup stores its data in the namespace b"sov-test" on Celestia. Which in this case is encoded using the
@@ -35,13 +40,13 @@ pub const GRPC_URL: &str = "grpc-euphrates.devnet.babylonlabs.io:443";
 
 pub const CONTRACT_ID: &str = "bbn10nmjre3ed34jx8uz9f9crksfuuqmtcz0t5g4sams7gezv2xf9has453ezd";
 
-const TIMEOUT_HEIGHT: u16 = 9001;
+const TIMEOUT_HEIGHT: u64 = 100;
 
 pub struct FinalityProvider {
     pub contract_address: String,
     pub keypair: SigningKey,
     pub client: HttpClient,
-    pub grpc_endpoint: String,
+    pub grpc_client: QueryClient<Channel>,
 }
 
 impl FinalityProvider {
@@ -50,7 +55,7 @@ impl FinalityProvider {
     }
 
     // one cycle of fetch -> verify -> push
-    pub async fn tick(&self) -> Result<()> {
+    pub async fn tick(&mut self) -> Result<()> {
         // fetch block from celestia
         let block = get_block_header(2547000).await?;
 
@@ -63,13 +68,20 @@ impl FinalityProvider {
         Ok(())
     }
 
-    pub async fn account(&self) -> Result<BaseAccount> {
-        use cosmrs::proto::cosmos::auth::v1beta1::{query_client, QueryAccountRequest};
+    pub async fn latest_block_height(&self) -> Result<Height> {
+        Ok(self.client.abci_info().await?.last_block_height)
+    }
 
-        let response = query_client::QueryClient::connect(self.grpc_endpoint.to_string())
-            .await?
+    pub async fn timeout_block_height(&self) -> Result<Height> {
+        let latest_height = self.latest_block_height().await?;
+        Height::try_from(latest_height.value() + TIMEOUT_HEIGHT).map_err(Into::into)
+    }
+
+    pub async fn account(&mut self) -> Result<BaseAccount> {
+        let response = self
+            .grpc_client
             .account(QueryAccountRequest {
-                address: self.keypair.public_key().to_string(),
+                address: self.keypair.babylon_account_id().to_string(),
             })
             .await?
             .into_inner()
@@ -78,18 +90,17 @@ impl FinalityProvider {
                 anyhow!("account query returned None - account might not be initialised")
             })?;
 
-        let account =
-            cosmrs::proto::cosmos::auth::v1beta1::BaseAccount::decode(response.value.as_slice())?;
+        let account = v1beta1::BaseAccount::decode(response.value.as_slice())?;
 
         BaseAccount::try_from(account).map_err(|e| anyhow!("could not decode base account: {e}"))
     }
 
-    pub async fn push_signatures(&self, blocks: &[&ExtendedHeader]) -> Result<()> {
+    pub async fn push_signatures(&mut self, blocks: &[&ExtendedHeader]) -> Result<()> {
         let msgs = blocks
             .iter()
             .map(|block| {
                 let msg = ExecuteMsg::SubmitFinalitySignature {
-                    fp_pubkey_hex: self.keypair.public_key().to_string(),
+                    fp_pubkey_hex: to_hex(self.keypair.public_key().to_bytes()),
                     height: block.height().into(),
                     pub_rand: Default::default(),
                     proof: Proof {
@@ -120,11 +131,12 @@ impl FinalityProvider {
         let signer_info =
             SignerInfo::single_direct(Some(self.keypair.public_key()), account.sequence);
         let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(
-            babylon_coin(100_000),
+            babylon_coin(1_000),
             150_000 * (msgs.len() as u64),
         ));
 
-        let body = Body::new(msgs, "", TIMEOUT_HEIGHT);
+        let timeout_height = self.timeout_block_height().await?;
+        let body = Body::new(msgs, "", timeout_height);
 
         let sign_doc = SignDoc::new(&body, &auth_info, &BABYLON_CHAIN_ID, account.account_number)
             .map_err(|e| anyhow!("could not create sign doc: {e}"))?;
@@ -151,11 +163,17 @@ async fn main() -> Result<()> {
 
     let client = HttpClient::new(RPC_URL)?;
 
-    let finality_provider = FinalityProvider {
+    let channel = Channel::from_static("https://grpc-euphrates.devnet.babylonlabs.io")
+        .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+        .connect()
+        .await?;
+    let grpc_client = QueryClient::new(channel);
+
+    let mut finality_provider = FinalityProvider {
         contract_address: CONTRACT_ID.to_string(),
         keypair,
         client,
-        grpc_endpoint: GRPC_URL.to_string(),
+        grpc_client,
     };
 
     loop {
