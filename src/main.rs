@@ -36,7 +36,7 @@ pub const ROLLUP_BATCH_NAMESPACE_RAW: [u8; 10] = [0, 0, 115, 111, 118, 45, 116, 
 pub const ROLLUP_PROOF_NAMESPACE_RAW: [u8; 10] = [115, 111, 118, 45, 116, 101, 115, 116, 45, 112];
 
 pub const RPC_URL: &str = "https://rpc-euphrates.devnet.babylonlabs.io";
-pub const GRPC_URL: &str = "grpc-euphrates.devnet.babylonlabs.io:443";
+pub const GRPC_URL: &str = "https://grpc-euphrates.devnet.babylonlabs.io";
 
 pub const CONTRACT_ID: &str = "bbn10nmjre3ed34jx8uz9f9crksfuuqmtcz0t5g4sams7gezv2xf9has453ezd";
 
@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
 
     let client = HttpClient::new(RPC_URL)?;
 
-    let channel = Channel::from_static("https://grpc-euphrates.devnet.babylonlabs.io")
+    let channel = Channel::from_static(GRPC_URL)
         .tls_config(ClientTlsConfig::new().with_enabled_roots())?
         .connect()
         .await?;
