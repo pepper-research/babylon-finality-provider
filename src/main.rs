@@ -26,6 +26,7 @@ use cosmrs::{
 use cosmwasm_std::{to_hex, Binary};
 use std::{path::PathBuf, str::FromStr};
 use tonic::transport::{Channel, ClientTlsConfig};
+use crate::celestia::get_latest_block_height;
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
 /// The rollup stores its data in the namespace b"sov-test" on Celestia. Which in this case is encoded using the
@@ -57,9 +58,13 @@ impl FinalityProvider {
     // one cycle of fetch -> verify -> push
     pub async fn tick(&mut self) -> Result<()> {
         // fetch block from celestia
-        let block = get_block_header(2547000).await?;
 
-        self.push_signatures(&[&block]).await?;
+        let latest = get_latest_block_height().await?;
+
+        println!("Latest block height: {}", latest);
+        // let block = get_block_header(2547000).await?;
+
+        // self.push_signatures(&[&block]).await?;
 
         // TODO: verify signatures
 
