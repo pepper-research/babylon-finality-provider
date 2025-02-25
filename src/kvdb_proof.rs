@@ -1,25 +1,49 @@
+use crate::config::StorageConfig;
 use anyhow::{anyhow, Context, Result};
 use babylon_merkle::Proof;
 use bincode;
 use bytes::{BufMut, BytesMut};
-use cosmwasm_schema::serde::Serialize;
+// use cosmwasm_schema::serde::Serialize;
 use kvdb::{DBTransaction, KeyValueDB};
+use kvdb_rocksdb::DatabaseConfig;
 use std::sync::Arc;
 
 const PROOF_COLUMN: u32 = 0;
 
-pub struct PubRandProofStore<DB>
-where
-    DB: KeyValueDB + 'static,
-{
-    db: Arc<DB>,
+// Unified storage interface
+pub trait ProofStore: Send + Sync {
+    fn add_proofs(
+        &self,
+        chain_id: &[u8],
+        pk: &[u8],
+        start_height: u64,
+        proofs: &[Proof],
+    ) -> Result<()>;
+    fn get_proof(&self, chain_id: &[u8], pk: &[u8], height: u64) -> Result<Proof>;
 }
 
-impl<DB> PubRandProofStore<DB>
-where
-    DB: KeyValueDB,
-{
-    pub fn new(db: Arc<DB>) -> Self {
+impl ProofStore for PubRandProofStore {
+    fn add_proofs(
+        &self,
+        chain_id: &[u8],
+        pk: &[u8],
+        start_height: u64,
+        proofs: &[Proof],
+    ) -> Result<()> {
+        self.add_proofs(chain_id, pk, start_height, proofs)
+    }
+
+    fn get_proof(&self, chain_id: &[u8], pk: &[u8], height: u64) -> Result<Proof> {
+        self.get_proof(chain_id, pk, height)
+    }
+}
+
+pub struct PubRandProofStore {
+    db: Arc<dyn KeyValueDB>,
+}
+
+impl PubRandProofStore {
+    pub fn new(db: Arc<dyn KeyValueDB>) -> Self {
         Self { db }
     }
 
@@ -73,19 +97,33 @@ fn composite_key(chain_id: &[u8], fp_pubkey: &[u8], height: u64) -> Vec<u8> {
     key.to_vec()
 }
 
+// For production (RocksDB)
+pub fn create_persistent_db(storage_config: &StorageConfig) -> Result<Arc<dyn KeyValueDB>> {
+    let mut config = DatabaseConfig::with_columns(storage_config.columns);
+    config.enable_statistics = true;
+
+    let db = kvdb_rocksdb::Database::open(&config, &storage_config.path)?;
+    Ok(Arc::new(db))
+}
+
+// For testing (In-memory)
+pub fn create_memory_db(num_cols: u32) -> Result<Arc<dyn KeyValueDB>> {
+    let db = kvdb_memorydb::create(num_cols); // 1 column
+    Ok(Arc::new(db))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k256::sha2::Digest;
-    use kvdb_memorydb::InMemory;
+    // use k256::sha2::Digest;
+    // use kvdb_memorydb::InMemory;
 
     const TEST_CHAIN_ID: &[u8] = b"test-chain";
     const TEST_PUBKEY: &[u8] = b"test-pubkey";
 
-    fn setup_store() -> PubRandProofStore<InMemory> {
-        // Directly use InMemory type
-        let db = kvdb_memorydb::create(1); // Create raw InMemory instance
-        PubRandProofStore::new(Arc::new(db)) // Arc-wrap here
+    fn setup_store() -> PubRandProofStore {
+        let db = create_memory_db(1).unwrap();
+        PubRandProofStore::new(db)
     }
 
     #[test]

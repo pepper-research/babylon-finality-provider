@@ -1,24 +1,27 @@
 pub mod babylon;
 pub mod celestia;
+mod config;
+mod kvdb_proof;
 pub mod msg;
 pub mod randomness;
-mod kvdb_babylon;
 
 use crate::{
     babylon::{babylon_coin, get_or_create_keypair, BabylonAccountId, BABYLON_CHAIN_ID},
-    celestia::get_block_header,
+    celestia::{get_block_header, get_latest_block_height},
+    config::{Config, DatabaseBackend, StorageConfig},
+    kvdb_proof::{create_persistent_db, ProofStore, PubRandProofStore},
     msg::ExecuteMsg,
 };
-use anyhow::{anyhow, Result};
+
+use crate::kvdb_proof::create_memory_db;
+use anyhow::{anyhow, Context, Result};
 use babylon_merkle::Proof;
+// use celestia_rpc::HeaderClient;
 use celestia_types::ExtendedHeader;
 use cosmrs::{
     auth::BaseAccount,
     cosmwasm::MsgExecuteContract,
-    crypto::{
-        secp256k1::SigningKey,
-        secp256k1::Signature
-    },
+    crypto::{secp256k1::Signature, secp256k1::SigningKey},
     proto::{
         cosmos::auth::v1beta1::{self, query_client::QueryClient, QueryAccountRequest},
         prost::Message,
@@ -29,10 +32,10 @@ use cosmrs::{
     AccountId,
 };
 use cosmwasm_std::{to_hex, Binary};
+use kvdb::KeyValueDB;
+use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
-use celestia_rpc::HeaderClient;
 use tonic::transport::{Channel, ClientTlsConfig};
-use crate::celestia::get_latest_block_height;
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
 /// The rollup stores its data in the namespace b"sov-test" on Celestia. Which in this case is encoded using the
@@ -54,9 +57,38 @@ pub struct FinalityProvider {
     pub keypair: SigningKey,
     pub client: HttpClient,
     pub grpc_client: QueryClient<Channel>,
+    pub config: Config,
+    pub store: Arc<dyn ProofStore>,
 }
 
 impl FinalityProvider {
+    pub fn new(
+        contract_address: String,
+        keypair: SigningKey,
+        client: HttpClient,
+        grpc_client: QueryClient<Channel>,
+        config: Config,
+    ) -> Result<Self> {
+        let db = Self::create_db(&config.storage).context("Failed to initialize database")?;
+        let store = Arc::new(PubRandProofStore::new(db));
+
+        Ok(Self {
+            contract_address,
+            keypair,
+            client,
+            grpc_client,
+            config,
+            store,
+        })
+    }
+
+    fn create_db(storage_config: &StorageConfig) -> Result<Arc<dyn KeyValueDB>> {
+        match storage_config.backend {
+            DatabaseBackend::RocksDB => Ok(create_persistent_db(storage_config)?),
+            DatabaseBackend::Memory => Ok(create_memory_db(storage_config.columns)?),
+        }
+    }
+
     pub fn contract_address(&self) -> AccountId {
         AccountId::from_str(&self.contract_address).unwrap()
     }
@@ -79,7 +111,8 @@ impl FinalityProvider {
 
     // By default, using k256::ecdsa::SigningKey to sign the block hash
     fn create_signatures(&self, block_hash: &[u8]) -> Result<Signature> {
-        self.keypair.sign(block_hash)
+        self.keypair
+            .sign(block_hash)
             .map_err(|e| anyhow!("could not sign block hash: {e}"))
     }
 
@@ -184,12 +217,21 @@ async fn main() -> Result<()> {
         .await?;
     let grpc_client = QueryClient::new(channel);
 
-    let mut finality_provider = FinalityProvider {
-        contract_address: CONTRACT_ID.to_string(),
+    let config = Config {
+        storage: StorageConfig {
+            backend: DatabaseBackend::RocksDB,
+            path: ".".into(),
+            columns: 1,
+        },
+    };
+
+    let mut finality_provider = FinalityProvider::new(
+        CONTRACT_ID.to_string(),
         keypair,
         client,
         grpc_client,
-    };
+        config,
+    )?;
 
     loop {
         if let Err(e) = finality_provider.tick().await {
