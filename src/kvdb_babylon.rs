@@ -76,24 +76,17 @@ fn composite_key(chain_id: &[u8], fp_pubkey: &[u8], height: u64) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kvdb_memorydb::InMemory;
     use k256::sha2::Digest;
+    use kvdb_memorydb::InMemory;
 
-    const LEAF_PREFIX: u8 = 0;
     const TEST_CHAIN_ID: &[u8] = b"test-chain";
     const TEST_PUBKEY: &[u8] = b"test-pubkey";
 
-    fn setup_store() -> PubRandProofStore<InMemory> {  // Directly use InMemory type
-        let db = kvdb_memorydb::create(1);  // Create raw InMemory instance
-        PubRandProofStore::new(Arc::new(db))  // Arc-wrap here
+    fn setup_store() -> PubRandProofStore<InMemory> {
+        // Directly use InMemory type
+        let db = kvdb_memorydb::create(1); // Create raw InMemory instance
+        PubRandProofStore::new(Arc::new(db)) // Arc-wrap here
     }
-
-    // pub fn leaf_hash(leaf: &[u8]) -> Vec<u8> {
-    //     let mut hasher = Sha256::new();
-    //     hasher.update([LEAF_PREFIX]);
-    //     hasher.update(leaf);
-    //     hasher.finalize().to_vec()
-    // }
 
     #[test]
     fn test_composite_key() {
@@ -215,10 +208,7 @@ mod tests {
             aunts: vec![vec![0; 32].into()],
         };
 
-        let proofs = vec![
-            proof1,
-            proof2
-        ];
+        let proofs = vec![proof1, proof2];
 
         store.add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, 300, &proofs)?;
 
