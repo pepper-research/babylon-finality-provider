@@ -77,7 +77,9 @@ fn composite_key(chain_id: &[u8], fp_pubkey: &[u8], height: u64) -> Vec<u8> {
 mod tests {
     use super::*;
     use kvdb_memorydb::InMemory;
-    use std::str::FromStr;
+    use k256::sha2::Digest;
+
+    const LEAF_PREFIX: u8 = 0;
     const TEST_CHAIN_ID: &[u8] = b"test-chain";
     const TEST_PUBKEY: &[u8] = b"test-pubkey";
 
@@ -86,43 +88,145 @@ mod tests {
         PubRandProofStore::new(Arc::new(db))  // Arc-wrap here
     }
 
+    // pub fn leaf_hash(leaf: &[u8]) -> Vec<u8> {
+    //     let mut hasher = Sha256::new();
+    //     hasher.update([LEAF_PREFIX]);
+    //     hasher.update(leaf);
+    //     hasher.finalize().to_vec()
+    // }
+
     #[test]
     fn test_composite_key() {
-        let chain_id = b"test_chain";
-        let fp_pubkey = b"test_pubkey";
         let height = 12345;
 
-        let key = composite_key(chain_id, fp_pubkey, height);
+        let key = composite_key(TEST_CHAIN_ID, TEST_PUBKEY, height);
 
-        let mut expected = BytesMut::with_capacity(chain_id.len() + fp_pubkey.len() + 8);
-        expected.put_slice(chain_id);
-        expected.put_slice(fp_pubkey);
+        let mut expected = BytesMut::with_capacity(TEST_CHAIN_ID.len() + TEST_PUBKEY.len() + 8);
+        expected.put_slice(TEST_CHAIN_ID);
+        expected.put_slice(TEST_PUBKEY);
         expected.put_u64(height);
 
         assert_eq!(key, expected.to_vec());
     }
 
-    // #[test]
-    // fn test_pub_rand_proof_store() {
-    //     let db = Arc::new(InMemory::default());
-    //     let store = PubRandProofStore::new(db);
-    //
-    //     let chain_id = b"test_chain";
-    //     let fp_pubkey = b"test_pubkey";
-    //     let height = 12345;
-    //
-    //     let proof = Proof {
-    //         index: 0,
-    //         total: 0,
-    //         leaf_hash: Default::default(),
-    //         aunts: Default::default(),
-    //     };
-    //
-    //     store
-    //         .add_proofs(chain_id, fp_pubkey, height, &[proof.clone()])
-    //         .unwrap();
-    //
-    //     let stored_proof = store.get_proof(chain_id, fp_pubkey, height).unwrap();
-    //     assert_eq!(stored_proof, proof);
-    // }
+    #[test]
+    fn test_pub_rand_proof_store() {
+        let store = setup_store();
+        let height = 12345;
+
+        let proof = Proof {
+            index: 0,
+            total: 0,
+            leaf_hash: Default::default(),
+            aunts: Default::default(),
+        };
+
+        store
+            .add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, height, &[proof.clone()])
+            .unwrap();
+
+        let stored_proof = store.get_proof(TEST_CHAIN_ID, TEST_PUBKEY, height).unwrap();
+        assert_eq!(stored_proof, proof);
+    }
+
+    #[test]
+    fn test_store_retrieve_single_proof() -> Result<()> {
+        let store = setup_store();
+
+        let leaf = b"foo";
+        let leaf_hash = babylon_merkle::hash::leaf_hash(leaf);
+
+        let proof = Proof {
+            total: 1,
+            index: 0,
+            leaf_hash: leaf_hash.clone().into(),
+            aunts: vec![vec![0; 32].into()],
+        };
+
+        store.add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, 100, &[proof.clone()])?;
+        let retrieved = store.get_proof(TEST_CHAIN_ID, TEST_PUBKEY, 100)?;
+
+        assert_eq!(retrieved, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn test_missing_proof() {
+        let store = setup_store();
+        let result = store.get_proof(TEST_CHAIN_ID, TEST_PUBKEY, 100);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No proof found"));
+    }
+
+    #[test]
+    fn test_proof_overwrite() -> Result<()> {
+        let store = setup_store();
+
+        let leaf1 = b"foo1";
+        let leaf_hash1 = babylon_merkle::hash::leaf_hash(leaf1);
+
+        let leaf2 = b"foo2";
+        let leaf_hash2 = babylon_merkle::hash::leaf_hash(leaf2);
+
+        let proof1 = Proof {
+            total: 1,
+            index: 0,
+            leaf_hash: leaf_hash1.clone().into(),
+            aunts: vec![vec![0; 32].into()],
+        };
+
+        let proof2 = Proof {
+            total: 1,
+            index: 0,
+            leaf_hash: leaf_hash2.clone().into(),
+            aunts: vec![vec![0; 32].into()],
+        };
+
+        store.add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, 200, &[proof1.clone()])?;
+        store.add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, 200, &[proof2.clone()])?;
+
+        let retrieved = store.get_proof(TEST_CHAIN_ID, TEST_PUBKEY, 200)?;
+        assert_eq!(retrieved, proof2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_proofs() -> Result<()> {
+        let store = setup_store();
+
+        let leaf1 = b"foo1";
+        let leaf_hash1 = babylon_merkle::hash::leaf_hash(leaf1);
+
+        let leaf2 = b"foo2";
+        let leaf_hash2 = babylon_merkle::hash::leaf_hash(leaf2);
+
+        let proof1 = Proof {
+            total: 1,
+            index: 0,
+            leaf_hash: leaf_hash1.clone().into(),
+            aunts: vec![vec![0; 32].into()],
+        };
+
+        let proof2 = Proof {
+            total: 1,
+            index: 0,
+            leaf_hash: leaf_hash2.clone().into(),
+            aunts: vec![vec![0; 32].into()],
+        };
+
+        let proofs = vec![
+            proof1,
+            proof2
+        ];
+
+        store.add_proofs(TEST_CHAIN_ID, TEST_PUBKEY, 300, &proofs)?;
+
+        for (i, expected) in proofs.iter().enumerate() {
+            let height = 300 + i as u64;
+            let retrieved = store.get_proof(TEST_CHAIN_ID, TEST_PUBKEY, height)?;
+            assert_eq!(&retrieved, expected);
+        }
+        Ok(())
+    }
 }
