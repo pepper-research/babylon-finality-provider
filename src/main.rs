@@ -1,6 +1,8 @@
 pub mod babylon;
 pub mod celestia;
 pub mod msg;
+pub mod randomness;
+mod kvdb_babylon;
 
 use crate::{
     babylon::{babylon_coin, get_or_create_keypair, BabylonAccountId, BABYLON_CHAIN_ID},
@@ -13,7 +15,10 @@ use celestia_types::ExtendedHeader;
 use cosmrs::{
     auth::BaseAccount,
     cosmwasm::MsgExecuteContract,
-    crypto::secp256k1::SigningKey,
+    crypto::{
+        secp256k1::SigningKey,
+        secp256k1::Signature
+    },
     proto::{
         cosmos::auth::v1beta1::{self, query_client::QueryClient, QueryAccountRequest},
         prost::Message,
@@ -25,6 +30,7 @@ use cosmrs::{
 };
 use cosmwasm_std::{to_hex, Binary};
 use std::{path::PathBuf, str::FromStr};
+use celestia_rpc::HeaderClient;
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::celestia::get_latest_block_height;
 
@@ -60,17 +66,21 @@ impl FinalityProvider {
         // fetch block from celestia
 
         let latest = get_latest_block_height().await?;
-
         println!("Latest block height: {}", latest);
-        // let block = get_block_header(2547000).await?;
 
-        // self.push_signatures(&[&block]).await?;
+        let block = get_block_header(2547000).await?;
+        self.push_signatures(&[&block]).await?;
 
         // TODO: verify signatures
-
         // TODO: push signatures to babylon contract via rpc
 
         Ok(())
+    }
+
+    // By default, using k256::ecdsa::SigningKey to sign the block hash
+    fn create_signatures(&self, block_hash: &[u8]) -> Result<Signature> {
+        self.keypair.sign(block_hash)
+            .map_err(|e| anyhow!("could not sign block hash: {e}"))
     }
 
     pub async fn latest_block_height(&self) -> Result<Height> {
