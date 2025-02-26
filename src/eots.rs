@@ -1,7 +1,10 @@
-use k256::{ecdsa::SigningKey, elliptic_curve::scalar::FromUintUnchecked, elliptic_curve::Field, schnorr::{
+use anyhow::{anyhow, Context, Result};
+use k256::{
+    ecdsa::SigningKey, elliptic_curve::scalar::FromUintUnchecked, elliptic_curve::Field,
+    schnorr::{
     signature::{hazmat::PrehashSigner, rand_core::CryptoRngCore},
     Signature, SigningKey as SchnorrSigningKey,
-}, FieldBytes, NonZeroScalar, ProjectivePoint, PublicKey, Scalar, Secp256k1, SecretKey};
+}, FieldBytes, NonZeroScalar, ProjectivePoint, PublicKey as K256PublicKey, Scalar, Secp256k1, SecretKey};
 
 use hmac::{Hmac, Mac};
 use rand_chacha::ChaCha20Rng;
@@ -11,6 +14,7 @@ use k256::elliptic_curve::point::AffineCoordinates;
 use k256::schnorr::signature::hazmat::RandomizedPrehashSigner;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use cosmrs::bip32::{PublicKey, PublicKeyBytes};
 use k256::elliptic_curve::PrimeField;
 use k256::elliptic_curve::subtle::CtOption;
 use rand::{rngs::StdRng, CryptoRng, RngCore};
@@ -25,14 +29,11 @@ type BIP340PubKey = [u8; 32];
 /// Represents a private randomness value (scalar)
 pub type PrivateRand = Scalar;
 
-/// Represents a public randomness value (x-coordinate)
-// pub type PublicRand = dyn k256::elliptic_curve::Field;
-
 struct KeyStore {
     // Maps (Chain ID, Block Height) to Public Key
     keys: HashMap<(Vec<u8>, u64), BIP340PubKey>,
     // Maps Public Keys to Private Keys
-    key_pairs: HashMap<BIP340PubKey, SigningKey>,
+    key_pairs: HashMap<BIP340PubKey, SchnorrSigningKey>,
 }
 
 pub struct EOTSManager {
@@ -50,112 +51,32 @@ impl EOTSManager {
     }
 
     // Generate or retrieve existing key for specific chain/height
-    // pub fn get_or_create_key(
-    //     &mut self,
-    //     chain_id: &[u8],
-    //     height: u64,
-    // ) -> Result<BIP340PubKey, &'static str> {
-    //     // Check if key exists for this context
-    //     if let Some(pubkey) = self.store.keys.get(&(chain_id.to_vec(), height)) {
-    //         return Ok(*pubkey);
-    //     }
-    //
-    //     // let mut rng = ChaCha20Rng::from_os_rng();
-    //     // let signing_key = SigningKey::random(&mut rng);
-    //
-    //     // Generate new key pair
-    //     let signing_key = SigningKey::random(&mut OsRng);
-    //     // let verifying_key = signing_key.verifying_key();
-    //     // let x_bytes = verifying_key.to_bytes();
-    //     let bip340_pubkey = signing_key.verifying_key().to_bytes().into();
-    //
-    //     // Convert to BIP-340 x-only format
-    //     // let bip340_pubkey = x_bytes.as_slice().try_into().unwrap();
-    //
-    //     // Store with context
-    //     self.store
-    //         .keys
-    //         .insert((chain_id.to_vec(), height), bip340_pubkey);
-    //
-    //     self.store.key_pairs.insert(bip340_pubkey, signing_key);
-    //
-    //     Ok(bip340_pubkey)
-    // }
+    pub fn get_or_create_key(
+        &mut self,
+        chain_id: &[u8],
+        height: u64,
+    ) -> Result<BIP340PubKey> {
+        // Check if key exists for this context
+        if let Some(pubkey) = self.store.keys.get(&(chain_id.to_vec(), height)) {
+            return Ok(*pubkey);
+        }
 
-    // GenerateRandomness generates a random scalar with the given key and src
-    // the result is deterministic with each given input
-    // pub fn generate_randomness(
-    //     key: &[u8],
-    //     chain_id: &[u8],
-    //     height: u64,
-    // ) -> (PrivateRand, PublicRand) {
-    //     let mut iteration: u64 = 0;
-    //
-    //     loop {
-    //         // calculate the random hash with iteration count
-    //         let mut mac = HmacSha256::new_from_slice(key)
-    //             .expect("HMAC can take key of any size");
-    //
-    //         // Append height as big-endian bytes
-    //         let height_bytes = height.to_be_bytes();
-    //         mac.update(&height_bytes);
-    //
-    //         // Append chain_id
-    //         mac.update(chain_id);
-    //
-    //         // Append iteration as big-endian bytes
-    //         let iteration_bytes = iteration.to_be_bytes();
-    //         mac.update(&iteration_bytes);
-    //
-    //         // Get the digest
-    //         let rand_pre = mac.finalize().into_bytes();
-    //
-    //         // Try to create a scalar from the bytes
-    //         if let Some(scalar) = Scalar::from_repr_vartime(rand_pre.into()) {
-    //             // Check if the scalar is zero
-    //             if !scalar.is_zero().into() {
-    //                 // Convert to private key
-    //                 let priv_rand = scalar;
-    //
-    //                 // Compute public key
-    //                 let point = ProjectivePoint::GENERATOR * priv_rand;
-    //                 let affine = point.to_affine();
-    //                 let pub_rand = affine.x();
-    //
-    //                 return (priv_rand, *pub_rand);
-    //             }
-    //         }
-    //
-    //         iteration += 1;
-    //     }
-    // }
+        // Generate new key pair
+        let signing_key = SchnorrSigningKey::random(&mut OsRng);
 
-    // Generate BIP-340 compliant randomness
-    // pub fn generate_randomness2(
-    //     privkey: &SigningKey,
-    //     chain_id: &[u8],
-    //     height: u64
-    // ) -> Scalar {
-    //     let mut hmac =
-    //         HmacSha256::new_from_slice(privkey.to_bytes().as_slice()).expect("HMAC key valid");
-    //
-    //     hmac.update(chain_id);
-    //     hmac.update(&height.to_be_bytes());
-    //
-    //     let seed = hmac.finalize().into_bytes();
-    //     let mut rng = ChaCha20Rng::from_seed(seed.into());
-    //
-    //     loop {
-    //         let mut bytes = [0u8; 32];
-    //         rng.fill_bytes(&mut bytes);
-    //
-    //         if let Ok(scalar) = Scalar::try_from(&bytes.into()) {
-    //             if !scalar.is_zero() {
-    //                 return scalar;
-    //             }
-    //         }
-    //     }
-    // }
+        // Get the verifying key and convert to bytes
+        let bip340_pubkey = signing_key.verifying_key().to_bytes().try_into()
+            .map_err(|_| anyhow!("Failed to convert public key to BIP340 format"))?;
+
+        // Store with context
+        self.store
+            .keys
+            .insert((chain_id.to_vec(), height), bip340_pubkey);
+
+        self.store.key_pairs.insert(bip340_pubkey, signing_key);
+
+        Ok(bip340_pubkey)
+    }
 
     //// Sign message with BIP-340 Schnorr signature
     // pub fn sign(
@@ -191,6 +112,21 @@ impl EOTSManager {
     //         .sign_prehash_with_rng(&mut rng, msg)
     //         .map_err(|_| "Signing failed")?)
     // }
+
+    fn generate_randomness_pairs(&self, pubkey: &BIP340PubKey, chain_id: &[u8], start_height: u64, num: u32) -> Result<Vec<BIP340PubKey>> {
+        let signing_key = self.store.key_pairs.get(pubkey).ok_or(anyhow!("Key not found"))?;
+        let privkey_bytes = signing_key.to_bytes();
+
+        let mut pr_list = Vec::with_capacity(num as usize);
+
+        for i in 0..num {
+            let height = start_height + i as u64;
+            let (_, pub_rand) = generate_randomness(&privkey_bytes, chain_id, height);
+            pr_list.push(pub_rand);
+        };
+
+        Ok(pr_list)
+    }
 }
 
 fn generate_randomness(privkey: &[u8], chain_id: &[u8], height: u64) -> (PrivateRand, BIP340PubKey) {
@@ -211,7 +147,7 @@ fn generate_randomness(privkey: &[u8], chain_id: &[u8], height: u64) -> (Private
         match scalar_opt {
             Some(scalar) if !bool::from(scalar.is_zero()) => {
                 let scalar_non_zero = &NonZeroScalar::new(scalar).unwrap();
-                let public_rand = PublicKey::from_secret_scalar(scalar_non_zero);
+                let public_rand = K256PublicKey::from_secret_scalar(scalar_non_zero);
                 let x = public_rand.as_affine().x();
                 return (scalar, x.into());
             }
