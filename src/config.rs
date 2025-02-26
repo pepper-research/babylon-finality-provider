@@ -1,6 +1,7 @@
 #[derive(Clone, Debug)]
 pub struct Config {
     pub storage: StorageConfig,
+    pub num_pub_rand: u32
 }
 
 #[derive(Clone, Debug)]
