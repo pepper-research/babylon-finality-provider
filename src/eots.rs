@@ -14,9 +14,11 @@ use k256::elliptic_curve::point::AffineCoordinates;
 use k256::schnorr::signature::hazmat::RandomizedPrehashSigner;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Write;
 use cosmrs::bip32::{PublicKey, PublicKeyBytes};
 use k256::elliptic_curve::PrimeField;
 use k256::elliptic_curve::subtle::CtOption;
+use k256::schnorr::signature::Signer;
 use rand::{rngs::StdRng, CryptoRng, RngCore};
 
 use rand_chacha::rand_core::SeedableRng;
@@ -36,11 +38,11 @@ struct KeyStore {
     key_pairs: HashMap<BIP340PubKey, SchnorrSigningKey>,
 }
 
-pub struct EOTSManager {
+pub struct EotsManager {
     store: KeyStore,
 }
 
-impl EOTSManager {
+impl EotsManager {
     pub fn new() -> Self {
         Self {
             store: KeyStore {
@@ -78,42 +80,26 @@ impl EOTSManager {
         Ok(bip340_pubkey)
     }
 
-    //// Sign message with BIP-340 Schnorr signature
-    // pub fn sign(
-    //     &self,
-    //     pubkey: &BIP340PubKey,
-    //     msg: &[u8],
-    //     chain_id: &[u8],
-    //     height: u64,
-    // ) -> Result<Signature, &'static str> {
-    //     let signing_key = self.store.key_pairs.get(pubkey).ok_or("Key not found")?;
-    //
-    //     // Generate context-bound randomness
-    //     let mut iteration = 0u64;
-    //     let randomness = loop {
-    //         let r = Self::generate_randomness(signing_key, chain_id, height, iteration);
-    //         iteration += 1;
-    //         if iteration > 100 {
-    //             return Err("Rejection sampling failed");
-    //         }
-    //         if !r.is_zero() {
-    //             break r;
-    //         }
-    //     };
-    //
-    //     let schnorr_key = SchnorrSigningKey::from(signing_key);
-    //     // let mut rng = ChaCha20Rng::from_seed(randomness.to_bytes().into());
-    //
-    //     // Use StdRng instead of ChaCha20Rng
-    //     let mut rng = StdRng::from_seed(randomness.to_bytes().into());
-    //     // let mut rng = ChaCha20Rng::from_seed(randomness.to_bytes().into());
-    //
-    //     Ok(schnorr_key
-    //         .sign_prehash_with_rng(&mut rng, msg)
-    //         .map_err(|_| "Signing failed")?)
-    // }
+    // Sign message with BIP-340 Schnorr signature
+    pub fn sign(
+        &self,
+        pubkey: &BIP340PubKey,
+        start_height: u64,
+        num_pub_rnd: u32,
+        msg: &[u8],
+    ) -> Result<Signature> {
+        let schnorr_key = self.store.key_pairs.get(pubkey).ok_or(anyhow!("Key not found"))?;
 
-    fn generate_randomness_pairs(&self, pubkey: &BIP340PubKey, chain_id: &[u8], start_height: u64, num: u32) -> Result<Vec<BIP340PubKey>> {
+        let mut hasher = Sha256::new();
+        hasher.update(start_height.to_be_bytes());
+        hasher.update(num_pub_rnd.to_be_bytes());
+        hasher.update(msg);
+        let hash = hasher.finalize().to_vec();
+
+        Ok(schnorr_key.sign(&hash))
+    }
+
+    pub fn generate_randomness_pairs(&self, pubkey: &BIP340PubKey, chain_id: &[u8], start_height: u64, num: u32) -> Result<Vec<BIP340PubKey>> {
         let signing_key = self.store.key_pairs.get(pubkey).ok_or(anyhow!("Key not found"))?;
         let privkey_bytes = signing_key.to_bytes();
 

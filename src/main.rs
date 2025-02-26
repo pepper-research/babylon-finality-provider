@@ -1,6 +1,8 @@
 pub mod babylon;
 pub mod celestia;
 mod config;
+mod eots;
+mod fp_merkle;
 mod kvdb_proof;
 pub mod msg;
 pub mod randomness;
@@ -17,6 +19,7 @@ use crate::kvdb_proof::create_memory_db;
 use anyhow::{anyhow, Context, Result};
 use babylon_merkle::Proof;
 // use celestia_rpc::HeaderClient;
+use babylon_merkle::tree::hash_from_byte_slices;
 use celestia_types::ExtendedHeader;
 use cosmrs::{
     auth::BaseAccount,
@@ -59,6 +62,7 @@ pub struct FinalityProvider {
     pub grpc_client: QueryClient<Channel>,
     pub config: Config,
     pub store: Arc<dyn ProofStore>,
+    pub eots: Arc<eots::EotsManager>,
 }
 
 impl FinalityProvider {
@@ -71,6 +75,7 @@ impl FinalityProvider {
     ) -> Result<Self> {
         let db = Self::create_db(&config.storage).context("Failed to initialize database")?;
         let store = Arc::new(PubRandProofStore::new(db));
+        let eots = Arc::new(eots::EotsManager::new());
 
         Ok(Self {
             contract_address,
@@ -79,6 +84,7 @@ impl FinalityProvider {
             grpc_client,
             config,
             store,
+            eots,
         })
     }
 
@@ -87,6 +93,29 @@ impl FinalityProvider {
             DatabaseBackend::RocksDB => Ok(create_persistent_db(storage_config)?),
             DatabaseBackend::Memory => Ok(create_memory_db(storage_config.columns)?),
         }
+    }
+
+    fn get_pub_rand_proof(&self, chain_id: &[u8], height: u64) -> Result<()> {
+        let pub_rand_list = self.generate_randomness_pairs(chain_id, height)?;
+        let commitment = hash_from_byte_slices(pub_rand_list);
+        // Dmitry: I will skip storing proofs for now
+        let pub_key = self.get_public_key_bytes()?;
+
+        self.eots.sign(&pub_key, height, self.config.num_pub_rand, &commitment)?;
+
+        !todo!()
+    }
+
+    fn get_public_key_bytes(&self) -> Result<[u8; 32]> {
+        self.keypair.public_key().to_bytes().try_into()
+            .map_err(|_| anyhow::anyhow!("Public key must be exactly 32 bytes"))
+    }
+
+    fn generate_randomness_pairs(&self, chain_id: &[u8], height: u64) -> Result<Vec<Vec<u8>>> {
+        let pub_key = self.get_public_key_bytes()?;
+        self.eots.generate_randomness_pairs(&pub_key, chain_id, height, self.config.num_pub_rand)
+            .context("Failed to generate randomness pairs")
+            .map(|pairs| pairs.into_iter().map(|pair| pair.to_vec()).collect())
     }
 
     pub fn contract_address(&self) -> AccountId {
@@ -220,9 +249,10 @@ async fn main() -> Result<()> {
     let config = Config {
         storage: StorageConfig {
             backend: DatabaseBackend::RocksDB,
-            path: ".".into(),
+            path: "./db".into(),
             columns: 1,
         },
+        num_pub_rand: 100,
     };
 
     let mut finality_provider = FinalityProvider::new(
