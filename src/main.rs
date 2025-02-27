@@ -34,10 +34,14 @@ use cosmrs::{
     AccountId,
 };
 use cosmwasm_std::{to_hex, Binary};
-use kvdb::KeyValueDB;
-use std::sync::Arc;
-use std::{path::PathBuf, str::FromStr};
 use k256::schnorr::signature::SignatureEncoding;
+use kvdb::KeyValueDB;
+use std::{
+    sync::Arc,
+    time::Duration,
+    path::PathBuf,
+    str::FromStr
+};
 use tonic::transport::{Channel, ClientTlsConfig};
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
@@ -98,10 +102,14 @@ impl FinalityProvider {
     pub async fn push_public_rand(&mut self, chain_id: &[u8], height: u64) -> Result<()> {
         let pub_rand_list = self.generate_randomness_pairs(chain_id, height)?;
         let commitment = hash_from_byte_slices(pub_rand_list);
+
         // Dmitry: I will skip storing proofs in local layer for now
+
         let pub_key = self.get_public_key_bytes()?;
 
-        let schnorr_sig = self.eots.sign(&pub_key, height, self.config.num_pub_rand, &commitment)?;
+        let schnorr_sig =
+            self.eots
+                .sign(&pub_key, height, self.config.num_pub_rand, &commitment)?;
 
         let msg = ExecuteMsg::CommitPublicRandomness {
             fp_pubkey_hex: to_hex(self.keypair.public_key().to_bytes()),
@@ -118,8 +126,9 @@ impl FinalityProvider {
             contract: self.contract_address(),
             msg: msg_json.into(),
             funds: vec![],
-        }.to_any()
-            .map_err(|e| anyhow!("could not convert message to any: {e}"))?;
+        }
+        .to_any()
+        .map_err(|e| anyhow!("could not convert message to any: {e}"))?;
 
         let msgs = vec![contract];
 
@@ -152,13 +161,17 @@ impl FinalityProvider {
     }
 
     fn get_public_key_bytes(&self) -> Result<[u8; 32]> {
-        self.keypair.public_key().to_bytes().try_into()
+        self.keypair
+            .public_key()
+            .to_bytes()
+            .try_into()
             .map_err(|_| anyhow::anyhow!("Public key must be exactly 32 bytes"))
     }
 
     fn generate_randomness_pairs(&self, chain_id: &[u8], height: u64) -> Result<Vec<Vec<u8>>> {
         let pub_key = self.get_public_key_bytes()?;
-        self.eots.generate_randomness_pairs(&pub_key, chain_id, height, self.config.num_pub_rand)
+        self.eots
+            .generate_randomness_pairs(&pub_key, chain_id, height, self.config.num_pub_rand)
             .context("Failed to generate randomness pairs")
             .map(|pairs| pairs.into_iter().map(|pair| pair.to_vec()).collect())
     }
@@ -238,7 +251,6 @@ impl FinalityProvider {
                 let msg_json = serde_json::to_string(&msg)?;
 
                 MsgExecuteContract {
-                    // TODO
                     sender: self.keypair.babylon_account_id(),
                     contract: self.contract_address(),
                     msg: msg_json.into(),
@@ -308,18 +320,15 @@ async fn main() -> Result<()> {
         config,
     )?;
 
-    loop {
-        if let Err(e) = finality_provider.tick().await {
-            eprintln!("error: {e}");
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(604800));
+        loop {
+            interval.tick().await;
+            if let Err(e) = finality_provider.tick().await {
+                eprintln!("error: {e}");
+            }
         }
-
-        // TODO: once a week, commit public randomness
-
-        // to test
-        if true {
-            break;
-        }
-    }
+    });
 
     Ok(())
 }
