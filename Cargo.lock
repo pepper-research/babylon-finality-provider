@@ -1416,7 +1416,6 @@ dependencies = [
  "rand 0.9.0",
  "rand_chacha 0.9.0",
  "rand_core 0.6.4",
- "rs_merkle",
  "serde_json",
  "sha2 0.10.8",
  "time",
@@ -3333,15 +3332,6 @@ checksum = "bb6f170a4041d50a0ce04b0d2e14916d6ca863ea2e422689a5b694395d299ffe"
 dependencies = [
  "libc",
  "librocksdb-sys",
-]
-
-[[package]]
-name = "rs_merkle"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb09b49230ba22e8c676e7b75dfe2887dea8121f18b530ae0ba519ce442d2b21"
-dependencies = [
- "sha2 0.10.8",
 ]
 
 [[package]]

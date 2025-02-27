@@ -5,7 +5,6 @@ mod eots;
 mod fp_merkle;
 mod kvdb_proof;
 pub mod msg;
-pub mod randomness;
 
 use crate::{
     babylon::{babylon_coin, get_or_create_keypair, BabylonAccountId, BABYLON_CHAIN_ID},
