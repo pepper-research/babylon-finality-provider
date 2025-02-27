@@ -40,14 +40,13 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::Arc,
-    time::Duration,
-    time::Instant
 };
 use rand::{
     Rng,
     SeedableRng,
     rngs::SmallRng
 };
+use tokio::time::{sleep_until, Duration, Instant};
 use tonic::transport::{Channel, ClientTlsConfig};
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
@@ -329,51 +328,24 @@ async fn main() -> Result<()> {
         config,
     )?;
 
-    tokio::spawn(async move {
-        let base_duration_secs: u64 = 604800; // 1 week
-        let jitter_factor = 0.01; // 1% jitter
-        let mut rng = SmallRng::from_os_rng();
+    const BASE_INTERVAL: Duration = Duration::from_secs(604_800); // 7 days
+    const JITTER_RANGE: Duration = Duration::from_secs(3600); // ±1 hour
 
-        // Use an anchor point to prevent drift
-        let start_time = Instant::now();
-        let mut tick_count: u64 = 0;
+    tokio::spawn(async move {
+        let mut rng = SmallRng::from_os_rng();
+        let mut base_schedule = Instant::now() + BASE_INTERVAL;
 
         loop {
-            // Calculate when the next tick should be based on the anchor time
-            let next_ideal_tick = start_time + Duration::from_secs(tick_count * base_duration_secs);
+            let jitter = random_jitter(&mut rng, JITTER_RANGE);
+            let next_run = base_schedule + jitter;
+            sleep_until(next_run).await;
 
-            // Add jitter around the ideal time
-            let jitter_range = (base_duration_secs as f64 * jitter_factor) as u64;
-            let jitter_secs = rng.random_range(0..=jitter_range);
-            let jitter_duration = Duration::from_secs(jitter_secs);
-
-            // Randomly add or subtract jitter
-            let next_tick_with_jitter = if rng.random_bool(0.5) {
-                // Add jitter
-                next_ideal_tick + jitter_duration
-            } else {
-                // Subtract jitter, but ensure we don't schedule before now
-                let now = Instant::now();
-                if now > next_ideal_tick - jitter_duration {
-                    now
-                } else {
-                    next_ideal_tick - jitter_duration
-                }
-            };
-
-            // Sleep until the next tick time
-            let now = Instant::now();
-            if next_tick_with_jitter > now {
-                tokio::time::sleep(next_tick_with_jitter - now).await;
-            }
-
-            // Execute the tick
             if let Err(e) = finality_provider.tick().await {
                 eprintln!("error: {e}");
             }
 
-            // Increment for the next iteration
-            tick_count += 1;
+            // Schedule next base interval WITHOUT jitter
+            base_schedule += BASE_INTERVAL;
         }
     });
 
@@ -389,3 +361,9 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+fn random_jitter(rng: &mut impl Rng, duration: Duration) -> Duration {
+    let jitter = rng.random_range(-(duration.as_secs() as i64)..=duration.as_secs() as i64);
+    Duration::from_secs(jitter.unsigned_abs())
+}
+
