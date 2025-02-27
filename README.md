@@ -1,5 +1,6 @@
 # Implemented
 
+- Added configuration
 - Reading key from storage
 - Storage layer for key-value pairs, InMemory for testing and RocksDB for production
 - Extended merkle tree implementation
