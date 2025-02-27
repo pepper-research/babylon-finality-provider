@@ -332,5 +332,15 @@ async fn main() -> Result<()> {
         }
     });
 
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        if let Ok(_) = tokio::signal::ctrl_c().await {
+            let _ = tx.send(());
+        }
+    });
+
+    let _ = rx.await;
+
     Ok(())
 }
