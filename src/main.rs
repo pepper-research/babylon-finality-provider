@@ -40,7 +40,13 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::Arc,
-    time::Duration
+    time::Duration,
+    time::Instant
+};
+use rand::{
+    Rng,
+    SeedableRng,
+    rngs::SmallRng
 };
 use tonic::transport::{Channel, ClientTlsConfig};
 
@@ -189,7 +195,8 @@ impl FinalityProvider {
 
         let block = get_block_header(2547000).await?;
         self.push_signatures(&[&block]).await?;
-        self.push_public_rand(&self.config.chain_id.to_be_bytes(), latest).await?;
+        self.push_public_rand(&self.config.chain_id.to_be_bytes(), latest)
+            .await?;
 
         // TODO: verify signatures
         // TODO: push signatures to babylon contract via rpc
@@ -323,12 +330,50 @@ async fn main() -> Result<()> {
     )?;
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(604800));
+        let base_duration_secs: u64 = 604800; // 1 week
+        let jitter_factor = 0.01; // 1% jitter
+        let mut rng = SmallRng::from_os_rng();
+
+        // Use an anchor point to prevent drift
+        let start_time = Instant::now();
+        let mut tick_count: u64 = 0;
+
         loop {
-            interval.tick().await;
+            // Calculate when the next tick should be based on the anchor time
+            let next_ideal_tick = start_time + Duration::from_secs(tick_count * base_duration_secs);
+
+            // Add jitter around the ideal time
+            let jitter_range = (base_duration_secs as f64 * jitter_factor) as u64;
+            let jitter_secs = rng.random_range(0..=jitter_range);
+            let jitter_duration = Duration::from_secs(jitter_secs);
+
+            // Randomly add or subtract jitter
+            let next_tick_with_jitter = if rng.random_bool(0.5) {
+                // Add jitter
+                next_ideal_tick + jitter_duration
+            } else {
+                // Subtract jitter, but ensure we don't schedule before now
+                let now = Instant::now();
+                if now > next_ideal_tick - jitter_duration {
+                    now
+                } else {
+                    next_ideal_tick - jitter_duration
+                }
+            };
+
+            // Sleep until the next tick time
+            let now = Instant::now();
+            if next_tick_with_jitter > now {
+                tokio::time::sleep(next_tick_with_jitter - now).await;
+            }
+
+            // Execute the tick
             if let Err(e) = finality_provider.tick().await {
                 eprintln!("error: {e}");
             }
+
+            // Increment for the next iteration
+            tick_count += 1;
         }
     });
 
