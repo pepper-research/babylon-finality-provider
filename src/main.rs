@@ -16,9 +16,9 @@ use crate::{
 
 use crate::kvdb_proof::create_memory_db;
 use anyhow::{anyhow, Context, Result};
-use babylon_merkle::Proof;
 // use celestia_rpc::HeaderClient;
 use babylon_merkle::tree::hash_from_byte_slices;
+use babylon_merkle::Proof;
 use celestia_types::ExtendedHeader;
 use cosmrs::{
     auth::BaseAccount,
@@ -37,10 +37,10 @@ use cosmwasm_std::{to_hex, Binary};
 use k256::schnorr::signature::SignatureEncoding;
 use kvdb::KeyValueDB;
 use std::{
-    sync::Arc,
-    time::Duration,
     path::PathBuf,
-    str::FromStr
+    str::FromStr,
+    sync::Arc,
+    time::Duration
 };
 use tonic::transport::{Channel, ClientTlsConfig};
 
