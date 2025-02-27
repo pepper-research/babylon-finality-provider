@@ -189,6 +189,7 @@ impl FinalityProvider {
 
         let block = get_block_header(2547000).await?;
         self.push_signatures(&[&block]).await?;
+        self.push_public_rand(&self.config.chain_id.to_be_bytes(), latest).await?;
 
         // TODO: verify signatures
         // TODO: push signatures to babylon contract via rpc
@@ -310,6 +311,7 @@ async fn main() -> Result<()> {
             columns: 1,
         },
         num_pub_rand: 100,
+        chain_id: 1,
     };
 
     let mut finality_provider = FinalityProvider::new(
