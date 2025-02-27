@@ -38,6 +38,7 @@ use cosmwasm_std::{to_hex, Binary};
 use kvdb::KeyValueDB;
 use std::sync::Arc;
 use std::{path::PathBuf, str::FromStr};
+use k256::schnorr::signature::SignatureEncoding;
 use tonic::transport::{Channel, ClientTlsConfig};
 
 /// The namespace used by the rollup to store its data. This is a raw slice of 8 bytes.
@@ -95,15 +96,60 @@ impl FinalityProvider {
         }
     }
 
-    fn get_pub_rand_proof(&self, chain_id: &[u8], height: u64) -> Result<()> {
+    pub async fn push_public_rand(&mut self, chain_id: &[u8], height: u64) -> Result<()> {
         let pub_rand_list = self.generate_randomness_pairs(chain_id, height)?;
         let commitment = hash_from_byte_slices(pub_rand_list);
-        // Dmitry: I will skip storing proofs for now
+        // Dmitry: I will skip storing proofs in local layer for now
         let pub_key = self.get_public_key_bytes()?;
 
-        self.eots.sign(&pub_key, height, self.config.num_pub_rand, &commitment)?;
+        let schnorr_sig = self.eots.sign(&pub_key, height, self.config.num_pub_rand, &commitment)?;
 
-        !todo!()
+        let msg = ExecuteMsg::CommitPublicRandomness {
+            fp_pubkey_hex: to_hex(self.keypair.public_key().to_bytes()),
+            start_height: height,
+            num_pub_rand: self.config.num_pub_rand,
+            signature: Binary::new(schnorr_sig.to_vec()),
+            commitment: Binary::new(commitment),
+        };
+
+        let msg_json = serde_json::to_string(&msg)?;
+
+        let contract = MsgExecuteContract {
+            sender: self.keypair.babylon_account_id(),
+            contract: self.contract_address(),
+            msg: msg_json.into(),
+            funds: vec![],
+        }.to_any()
+            .map_err(|e| anyhow!("could not convert message to any: {e}"))?;
+
+        let msgs = vec![contract];
+
+        let account = self.account().await?;
+        let signer_info =
+            SignerInfo::single_direct(Some(self.keypair.public_key()), account.sequence);
+        let auth_info = signer_info.auth_info(Fee::from_amount_and_gas(
+            babylon_coin(1_000),
+            150_000 * (msgs.len() as u64),
+        ));
+
+        let timeout_height = self.timeout_block_height().await?;
+        let body = Body::new(msgs, "", timeout_height);
+
+        let sign_doc = SignDoc::new(&body, &auth_info, &BABYLON_CHAIN_ID, account.account_number)
+            .map_err(|e| anyhow!("could not create sign doc: {e}"))?;
+
+        let tx_signed = sign_doc
+            .sign(&self.keypair)
+            .map_err(|e| anyhow!("could not sign tx: {e}"))?;
+
+        let signature = tx_signed
+            .broadcast_commit(&self.client)
+            .await
+            .map_err(|e| anyhow!("could not broadcast tx: {e}"))?;
+
+        println!("signature = {signature:#?}");
+
+        Ok(())
     }
 
     fn get_public_key_bytes(&self) -> Result<[u8; 32]> {

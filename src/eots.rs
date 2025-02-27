@@ -85,7 +85,7 @@ impl EotsManager {
         &self,
         pubkey: &BIP340PubKey,
         start_height: u64,
-        num_pub_rnd: u32,
+        num_pub_rnd: u64,
         msg: &[u8],
     ) -> Result<Signature> {
         let schnorr_key = self.store.key_pairs.get(pubkey).ok_or(anyhow!("Key not found"))?;
@@ -99,7 +99,7 @@ impl EotsManager {
         Ok(schnorr_key.sign(&hash))
     }
 
-    pub fn generate_randomness_pairs(&self, pubkey: &BIP340PubKey, chain_id: &[u8], start_height: u64, num: u32) -> Result<Vec<BIP340PubKey>> {
+    pub fn generate_randomness_pairs(&self, pubkey: &BIP340PubKey, chain_id: &[u8], start_height: u64, num: u64) -> Result<Vec<BIP340PubKey>> {
         let signing_key = self.store.key_pairs.get(pubkey).ok_or(anyhow!("Key not found"))?;
         let privkey_bytes = signing_key.to_bytes();
 
