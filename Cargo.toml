@@ -17,9 +17,20 @@ celestia-types = "0.9.0"
 cosmrs = { version = "0.21.0", features = ["cosmwasm", "rpc", "grpc", "dev"] }
 cosmwasm-schema = "2.2.0"
 cosmwasm-std = "2.2.0"
-k256 = { version = "0.13.4", default-features = false, features = ["ecdsa", "sha256"] }
+k256 = { version = "0.13.4", default-features = false, features = ["ecdsa", "sha256", "schnorr"] }
 once_cell = "1.20.2"
 rand_core = { version = "0.6.0", features = ["getrandom"], default-features = false }
 serde_json = "1.0.138"
-tokio = { version = "1.43.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.43.0", features = ["rt-multi-thread","rt", "macros", "time", "signal"] }
 tonic = { version = "0.12.3", features = ["tls-roots"] }
+bytes = "1.9.0"
+bincode = "1.3.3"
+kvdb = "0.13.0" # Parity's abstract key-value database
+kvdb-rocksdb = "0.19.0"
+sha2 = "0.10.8"
+hmac = "0.12.1"
+rand = "0.9.0"
+rand_chacha = "0.9.0"
+time = "0.3.37"  # For persistent storage
+kvdb-memorydb = "0.13.0" # Parity's in-memory key-value database
+
