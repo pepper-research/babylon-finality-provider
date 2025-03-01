@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.95"
 babylon-apis = { git = "https://github.com/babylonlabs-io/babylon-contract", tag = "v0.11.0-rc.1"}
 babylon-merkle = { git = "https://github.com/babylonlabs-io/babylon-contract", tag = "v0.11.0-rc.1"}
+eots = { git = "https://github.com/babylonlabs-io/babylon-contract", tag = "v0.11.0-rc.1"}
 celestia-rpc = "0.8.0"
 celestia-types = "0.9.0"
 # babylon-bindings = { path = "../../packages/bindings" }
@@ -23,3 +24,5 @@ rand_core = { version = "0.6.0", features = ["getrandom"], default-features = fa
 serde_json = "1.0.138"
 tokio = { version = "1.43.0", features = ["rt-multi-thread"] }
 tonic = { version = "0.12.3", features = ["tls-roots"] }
+sha2 = "0.10.8"
+hmac = "0.12.1"
